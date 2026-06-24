@@ -203,6 +203,67 @@ test('adjusting the focus to a different word saves that word', async () => {
   }
 });
 
+// ───────── Absorb Trellis .ohcourse drilling ─────────
+const SAMPLE_OHCOURSE = JSON.stringify({
+  schemaVersion: '1.0',
+  id: 'test-course',
+  title: 'Test Course',
+  nodes: [
+    {
+      id: 'n1', title: 'Node One', intake: 'Teaching prose about node one.',
+      items: [
+        { type: 'cloze', id: 'c1', rung: 1, text: 'The capital of France is {{c1::Paris}}.', answers: { c1: 'Paris' } },
+        { type: 'qa', id: 'q1', rung: 1, prompt: 'What is 2+2?', answer: '4' },
+      ],
+    },
+    {
+      id: 'n2', title: 'Node Two', intake: 'Prose about node two.', prereqs: ['n1'],
+      items: [
+        { type: 'discrimination', id: 'd1', rung: 2, prompt: 'Pick the prime', choices: ['4', '6', '7'], correctIndex: 2, explanation: '7 is prime.' },
+        { type: 'procedure', id: 'p1', rung: 2, prompt: 'Boil an egg', steps: ['Boil water', 'Add egg', 'Wait 7 min'] },
+      ],
+    },
+  ],
+});
+
+test('importing an .ohcourse turns every item into a reviewable card', async () => {
+  const page = await freshPage();
+  try {
+    const out = await page.evaluate(async (txt) => {
+      const res = await window.importOhcourse(txt);
+      const all = await window.dbListExtracts(window.activeProfile().pid);
+      const mine = all.filter((e) => e.bookId === res.bookId);
+      return {
+        res,
+        recs: mine.map((e) => ({ kind: e.kind, p: e.clozePrompt, a: e.clozeAnswer, ch: e.chapterTitle })),
+        bookTitle: document.getElementById('bookTitle').textContent,
+      };
+    }, SAMPLE_OHCOURSE);
+
+    assert.equal(out.res.cards, 4, 'four items → four cards');
+    assert.equal(out.res.title, 'Test Course');
+    assert.equal(out.recs.length, 4, 'cards are linked to the imported book');
+    assert.ok(out.recs.every((e) => e.kind === 'cloze'), 'all map onto the two-sided card');
+
+    const cloze = out.recs.find((e) => (e.p || '').includes('capital of France'));
+    assert.ok(cloze && cloze.p.includes('____'), 'cloze blank is rendered as a gap');
+    assert.ok(cloze.a.includes('Paris'), 'cloze answer is Paris');
+
+    assert.ok(out.recs.some((e) => e.p === 'What is 2+2?' && e.a === '4'), 'qa front/back preserved');
+
+    const disc = out.recs.find((e) => (e.p || '').includes('Pick the prime'));
+    assert.ok(disc && disc.p.includes('7') && disc.a.includes('7'), 'discrimination choices + correct answer');
+
+    const proc = out.recs.find((e) => (e.p || '').includes('Boil an egg'));
+    assert.ok(proc && proc.a.includes('Boil water'), 'procedure steps land in the answer');
+
+    assert.ok(out.recs.some((e) => e.ch === 'Node One'), 'cards carry their node as the chapter');
+    assert.equal(out.bookTitle, 'Test Course', 'the prose loads as a readable book');
+  } finally {
+    await page.close();
+  }
+});
+
 test('dragging across tokens saves a multi-word focus span', async () => {
   const page = await freshPage(FOCUS_DOC, 'Focus Doc');
   try {

@@ -439,6 +439,11 @@ input[type=range]{width:100%;accent-color:var(--oh-interactive);height:24px}
 .ep-tokens .ep-token{padding:1px 2px;border-radius:3px;border-bottom:2px solid transparent}
 .ep-tokens .ep-token.sel{background:var(--oh-hearth-100);color:var(--oh-interactive);font-weight:600;border-bottom-color:var(--oh-interactive)}
 [data-theme="dark"] .ep-tokens .ep-token.sel{background:rgba(255,170,100,0.18)}
+/* Cloze / imported-card answer: wraps + blurs until tapped (handles multi-line
+   choices and step lists, not just one short word). */
+.review-context.cloze-prompt{white-space:pre-wrap}
+.cloze-answer{white-space:pre-wrap;font-family:var(--oh-font-reading,Lora,Georgia,serif);font-size:21px;line-height:1.5;color:var(--oh-interactive);text-align:center;margin-bottom:var(--oh-space-md);cursor:pointer;filter:blur(7px);transition:filter .15s ease}
+.cloze-answer.revealed{filter:none;cursor:default}
 .review-source{margin-top:var(--oh-space-md);font-family:var(--oh-font-ui);font-size:12px;color:var(--oh-text-tertiary)}
 .review-actions{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--oh-space-sm);width:100%;margin-top:var(--oh-space-xs)}
 .review-btn{padding:12px 8px;border:1px solid var(--oh-border);background:var(--oh-surface);color:var(--oh-text-primary);font-family:var(--oh-font-ui);font-weight:600;font-size:13px;border-radius:var(--oh-radius-md);cursor:pointer;transition:background 180ms ease,border-color 180ms ease}
@@ -736,8 +741,8 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,.profile-card:fo
         <button class="btn-s" id="libBtnUrl">From URL</button>
         <button class="btn-s" id="libBtnAudio">Audio (transcribe)</button>
         <button class="btn-s" id="libBtnGenerate" style="display:none">Generate ✨</button>
-        <input type="file" id="libFile" accept=".epub,.pdf,.txt,.text,.md" multiple style="display:none">
-        <input type="file" id="libFolder" accept=".epub,.pdf,.txt,.text,.md" webkitdirectory multiple style="display:none">
+        <input type="file" id="libFile" accept=".epub,.pdf,.txt,.text,.md,.ohcourse" multiple style="display:none">
+        <input type="file" id="libFolder" accept=".epub,.pdf,.txt,.text,.md,.ohcourse" webkitdirectory multiple style="display:none">
       </div>
     </div>
     <div class="lib-count" id="libCount"></div>
@@ -3125,9 +3130,93 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change",()=>{
 });
 
 /* ───── UI wiring ───── */
+/* ───── .ohcourse import — absorb Trellis's drilling ─────
+   An .ohcourse is a Course of KnowledgeNodes; each node carries teaching prose
+   (intake) and retrieval items (cloze / qa / discrimination / procedure). We
+   import BOTH halves so a course is a first-class source: the prose becomes a
+   readable book (node titles → chapters → a TOC) and every item becomes a
+   two-sided review card, all linked to that book so they share a source line and
+   surface together. The four item types collapse onto one prompt/answer card —
+   ohPrimer's existing cloze renderer — which is what "drilling" needs. */
+function _ohcourseItemToCard(item){
+  const t=item&&item.type;
+  if(t==="cloze"){
+    const text=String(item.text||"");
+    // {{cN::answer}} blanks (Anki-style) → a visible gap on the front; the
+    // answers (in text order, falling back to the answers map) are the back.
+    const blanks=[...text.matchAll(/\{\{c\d+::(.*?)\}\}/g)].map(m=>m[1]);
+    const answers=blanks.length?blanks:Object.values(item.answers||{});
+    return {prompt:text.replace(/\{\{c\d+::(.*?)\}\}/g,"____"),answer:answers.join(", ")};
+  }
+  if(t==="qa")return {prompt:String(item.prompt||""),answer:String(item.answer||"")};
+  if(t==="discrimination"){
+    const choices=Array.isArray(item.choices)?item.choices:[];
+    const L="ABCDEFGHIJKLMNOP";
+    const listed=choices.map((c,i)=>`${L[i]||i+1}. ${c}`).join("\n");
+    const ci=item.correctIndex;
+    const correct=(ci>=0&&ci<choices.length)?`${L[ci]||ci+1}. ${choices[ci]}`:"";
+    return {prompt:`${item.prompt||""}\n\n${listed}`,answer:item.explanation?`${correct}\n\n${item.explanation}`:correct};
+  }
+  if(t==="procedure"){
+    const steps=Array.isArray(item.steps)?item.steps:[];
+    return {prompt:String(item.prompt||""),answer:steps.map((s,i)=>`${i+1}. ${s}`).join("\n")};
+  }
+  return null; // unknown type → skipped
+}
+async function importOhcourse(text){
+  let course;
+  try{course=JSON.parse(text);}catch(e){throw new Error("That file isn't valid JSON.");}
+  if(!course||typeof course!=="object"||!Array.isArray(course.nodes)||!course.nodes.length){
+    throw new Error("That doesn't look like an .ohcourse (no nodes).");
+  }
+  const title=course.title||"Imported course";
+  // 1) Readable book from the node prose.
+  const blocks=[];
+  course.nodes.forEach((node,ni)=>{
+    blocks.push({type:"chapter",title:node.title||("Section "+(ni+1))});
+    if(node.summary)blocks.push({type:"text",text:String(node.summary)});
+    if(node.intake)blocks.push({type:"text",text:String(node.intake)});
+  });
+  if(!blocks.some(b=>b.type==="text"))blocks.push({type:"text",text:title});
+  const parsed={title,blocks};
+  currentBookId=null;
+  loadDocument(parsed);
+  await persistNewBook(
+    {name:"ohcourse-"+String(course.id||title).replace(/[^a-z0-9]+/gi,"-")+".ohcourse",size:text.length},
+    parsed,{kind:"ohcourse",label:title});
+  const bookId=currentBookId;
+  // 2) One two-sided card per retrieval item, linked to the book.
+  const pi=activeProfile().pid;
+  let cards=0;
+  for(const node of course.nodes){
+    const items=Array.isArray(node.items)?node.items:[];
+    for(const item of items){
+      const card=_ohcourseItemToCard(item);
+      if(!card||!card.prompt)continue;
+      const rec={
+        id:"ext::"+pi+"::"+Date.now()+"::"+Math.random().toString(36).slice(2,7),
+        profileIdx:pi,kind:"cloze",srcType:item.type,
+        bookId,bookTitle:title,chapterTitle:node.title||"",
+        context:card.prompt,clozePrompt:card.prompt,clozeAnswer:card.answer||"?",
+        focusWord:"",focusIdx:0,wordIdx:0,
+        createdAt:Date.now(),
+        EF:2.5,reps:0,interval:0,nextReview:Date.now(),history:[],
+      };
+      try{await dbSaveExtract(rec);cards++;}catch(ex){console.warn("ohcourse card save",ex);}
+    }
+  }
+  if(typeof updateReviewBadge==="function")updateReviewBadge();
+  showToast(`Imported ${cards} card${cards===1?"":"s"} · ${title}`);
+  return {cards,title,bookId};
+}
 async function handleFileLoad(file){
   showStatus("Loading…",false);
   try{
+    if(/\.ohcourse$/i.test(file.name)){
+      await importOhcourse(await file.text());
+      clearStatus();
+      return;
+    }
     let parsed;
     if(/\.epub$/i.test(file.name))parsed=await parseEpubFile(file);
     else if(/\.pdf$/i.test(file.name))parsed=await parsePdfWithOcrFallback(file);
@@ -3916,9 +4005,13 @@ function renderReview(){
   const sourceLine=`<div class="review-source">${esc(r.bookTitle||"—")}${r.chapterTitle?" · "+esc(r.chapterTitle):""}</div>`;
   let cardBody;
   if(isCloze){
-    cardBody=`<div class="review-kind-tag">Cloze</div>
-       <div class="review-context">${esc(r.clozePrompt||"")}</div>
-       <div class="review-word-big" id="clozeReveal" style="cursor:pointer;opacity:0.3;user-select:none" title="Click to reveal">${esc(r.clozeAnswer||"?")}</div>${sourceLine}`;
+    // Imported .ohcourse items all land here (cloze/qa/discrimination/procedure);
+    // the tag names what kind it was, and the answer wraps + stays blurred until
+    // tapped so multi-line answers (choices, steps) read cleanly.
+    const tag={qa:"Q & A",discrimination:"Choose",procedure:"Steps",cloze:"Cloze"}[r.srcType]||"Cloze";
+    cardBody=`<div class="review-kind-tag">${tag}</div>
+       <div class="review-context cloze-prompt">${esc(r.clozePrompt||"")}</div>
+       <div class="cloze-answer" id="clozeReveal" data-reveal title="Tap to reveal">${esc(r.clozeAnswer||"?")}</div>${sourceLine}`;
   }else if(isWord){
     cardBody=`<div class="review-kind-tag">Vocab</div>
        <div class="review-context" id="focusFront" data-reveal>${blankedHtml}</div>${sourceLine}`;
@@ -3952,7 +4045,7 @@ function renderReview(){
   }
   // Cloze reveal
   const revealEl=body.querySelector("#clozeReveal");
-  if(revealEl)revealEl.addEventListener("click",()=>{revealEl.style.opacity="1";revealEl.style.cursor="default";});
+  if(revealEl)revealEl.addEventListener("click",()=>revealEl.classList.add("revealed"));
   // Two-sided passage/vocab reveal: swap the blanked front for the highlighted
   // answer. Injected on click so the answer isn't in the DOM (or read aloud) early.
   const focusFront=body.querySelector("#focusFront[data-reveal]");
