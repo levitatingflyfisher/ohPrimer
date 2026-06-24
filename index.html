@@ -428,6 +428,11 @@ input[type=range]{width:100%;accent-color:var(--oh-interactive);height:24px}
 .review-context{font-family:var(--oh-font-reading,Lora,Georgia,serif);font-size:19px;line-height:1.6;color:var(--oh-text-primary)}
 .review-context .focus-word{background:var(--oh-hearth-100);color:var(--oh-interactive);font-weight:600;padding:0 3px;border-radius:3px}
 [data-theme="dark"] .review-context .focus-word{background:rgba(255,170,100,0.18)}
+/* Front of a two-sided passage/vocab card: the focus span is a fill-in blank
+   you tap to reveal. The whole context is clickable while still hidden. */
+.review-context[data-reveal]{cursor:pointer}
+.review-context .focus-blank{display:inline-block;min-width:3em;border-bottom:2px solid var(--oh-interactive);color:transparent;font-weight:600;border-radius:2px;vertical-align:baseline}
+.review-context[data-reveal]::after{content:"Tap to reveal";display:block;margin-top:var(--oh-space-sm);font-family:var(--oh-font-ui);font-size:11px;color:var(--oh-text-tertiary);letter-spacing:0.04em}
 .review-source{margin-top:var(--oh-space-md);font-family:var(--oh-font-ui);font-size:12px;color:var(--oh-text-tertiary)}
 .review-actions{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--oh-space-sm);width:100%;margin-top:var(--oh-space-xs)}
 .review-btn{padding:12px 8px;border:1px solid var(--oh-border);background:var(--oh-surface);color:var(--oh-text-primary);font-family:var(--oh-font-ui);font-weight:600;font-size:13px;border-radius:var(--oh-radius-md);cursor:pointer;transition:background 180ms ease,border-color 180ms ease}
@@ -3799,7 +3804,20 @@ function renderReview(){
   const isWord=r.kind==="word";
   const isCloze=r.kind==="cloze";
   const parts=(r.context||"").split(/\s+/);
-  const focused=parts.map((w,i)=>i===r.focusIdx?`<span class="focus-word">${esc(w)}</span>`:esc(w)).join(" ");
+  // Two-sided rendering for passage & vocab cards: the focus span is blanked on
+  // the front and revealed on tap. focusEndIdx defaults to focusIdx (a single
+  // word); Bug 2's adjustable highlight sets a wider range. The answer is NOT
+  // placed in the DOM until reveal — textContent would otherwise leak it.
+  const fStart=Math.max(0,r.focusIdx||0);
+  const fEnd=Math.min(parts.length-1,r.focusEndIdx!=null?r.focusEndIdx:fStart);
+  const frontParts=[];
+  for(let i=0;i<parts.length;i++){
+    if(i===fStart)frontParts.push(`<span class="focus-blank">____</span>`);
+    else if(i>fStart&&i<=fEnd)continue; // the whole span collapses into one blank
+    else frontParts.push(esc(parts[i]));
+  }
+  const blankedHtml=frontParts.join(" ");
+  const revealedHtml=parts.map((w,i)=>(i>=fStart&&i<=fEnd)?`<span class="focus-word">${esc(w)}</span>`:esc(w)).join(" ");
   const previews={again:sm2(r,1),hard:sm2(r,3),good:sm2(r,4),easy:sm2(r,5)};
   const sourceLine=`<div class="review-source">${esc(r.bookTitle||"—")}${r.chapterTitle?" · "+esc(r.chapterTitle):""}</div>`;
   let cardBody;
@@ -3809,10 +3827,9 @@ function renderReview(){
        <div class="review-word-big" id="clozeReveal" style="cursor:pointer;opacity:0.3;user-select:none" title="Click to reveal">${esc(r.clozeAnswer||"?")}</div>${sourceLine}`;
   }else if(isWord){
     cardBody=`<div class="review-kind-tag">Vocab</div>
-       <div class="review-word-big">${esc(r.focusWord||"")}</div>
-       <div class="review-context">${focused}</div>${sourceLine}`;
+       <div class="review-context" id="focusFront" data-reveal>${blankedHtml}</div>${sourceLine}`;
   }else{
-    cardBody=`<div class="review-context">${focused}</div>${sourceLine}`;
+    cardBody=`<div class="review-context" id="focusFront" data-reveal>${blankedHtml}</div>${sourceLine}`;
   }
   body.innerHTML=`
     <div class="review-progress">Review · ${reviewPos+1} of ${reviewTotal}</div>
@@ -3842,6 +3859,13 @@ function renderReview(){
   // Cloze reveal
   const revealEl=body.querySelector("#clozeReveal");
   if(revealEl)revealEl.addEventListener("click",()=>{revealEl.style.opacity="1";revealEl.style.cursor="default";});
+  // Two-sided passage/vocab reveal: swap the blanked front for the highlighted
+  // answer. Injected on click so the answer isn't in the DOM (or read aloud) early.
+  const focusFront=body.querySelector("#focusFront[data-reveal]");
+  if(focusFront)focusFront.addEventListener("click",()=>{
+    focusFront.innerHTML=revealedHtml;
+    focusFront.removeAttribute("data-reveal");
+  });
   // Make cloze from passage extract
   const clozeBtn=body.querySelector("#reviewMakeCloze");
   if(clozeBtn){

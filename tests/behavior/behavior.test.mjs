@@ -93,3 +93,74 @@ test('closing the TOC does NOT auto-start playback if it was paused on open', as
     await page.close();
   }
 });
+
+// ───────── Bug 1: passage/vocab review cards are two-sided ─────────
+// A flashcard needs a front (the prompt, answer hidden) and a back (the answer
+// revealed). The focus word is a rare token so "is it hidden?" is unambiguous.
+const FOCUS_DOC = 'alpha beta gamma delta zonktastic epsilon zeta eta theta iota kappa lambda.';
+const FOCUS_IDX = 4; // whitespace position of "zonktastic" (plain prose ⇒ token idx)
+
+// Save one extract of the given kind on the focus word, then open Review and
+// wait for the card to render. Returns the rendered card's initial text + whether
+// a reveal control is present.
+async function reviewCard(page, kind) {
+  return page.evaluate(
+    async ([k, i]) => {
+      window.seekTo(i);
+      const rec = await window.saveExtractRecord(k);
+      await window.enterReview();
+      // wait a tick for renderReview's async stats paint
+      await new Promise((r) => setTimeout(r, 50));
+      const body = document.getElementById('reviewBody');
+      const reveal = body.querySelector('[data-reveal]');
+      return {
+        focusWord: rec && rec.focusWord,
+        frontText: body.textContent,
+        hasReveal: !!reveal,
+      };
+    },
+    [kind, FOCUS_IDX],
+  );
+}
+
+test('a passage card hides its focus word until revealed', async () => {
+  const page = await freshPage(FOCUS_DOC, 'Focus Doc');
+  try {
+    const card = await reviewCard(page, 'passage');
+    assert.equal(card.focusWord, 'zonktastic', 'extract should focus the rare word');
+    assert.ok(card.hasReveal, 'passage card must have a reveal control (two-sided)');
+    assert.ok(
+      !card.frontText.includes('zonktastic'),
+      'the focus word must be HIDDEN on the front of the card',
+    );
+
+    // reveal, then the answer appears
+    const revealedText = await page.evaluate(() => {
+      document.querySelector('#reviewBody [data-reveal]').click();
+      return document.getElementById('reviewBody').textContent;
+    });
+    assert.ok(revealedText.includes('zonktastic'), 'the focus word appears after revealing');
+  } finally {
+    await page.close();
+  }
+});
+
+test('a vocab card hides the flagged word until revealed', async () => {
+  const page = await freshPage(FOCUS_DOC, 'Focus Doc');
+  try {
+    const card = await reviewCard(page, 'word');
+    assert.equal(card.focusWord, 'zonktastic');
+    assert.ok(card.hasReveal, 'vocab card must have a reveal control (two-sided)');
+    assert.ok(
+      !card.frontText.includes('zonktastic'),
+      'the flagged vocab word must be HIDDEN on the front',
+    );
+    const revealedText = await page.evaluate(() => {
+      document.querySelector('#reviewBody [data-reveal]').click();
+      return document.getElementById('reviewBody').textContent;
+    });
+    assert.ok(revealedText.includes('zonktastic'), 'the vocab word appears after revealing');
+  } finally {
+    await page.close();
+  }
+});
