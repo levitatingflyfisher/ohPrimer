@@ -773,6 +773,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,.profile-card:fo
     <div class="reader-who" id="readerWho"></div>
     <div class="reader-top-actions">
       <button class="top-icon" id="btnReaderLibrary" aria-label="Library" title="Library">📚</button>
+      <button class="top-icon" id="btnShare" aria-label="Share this source" title="Share this source with a friend">⤴</button>
       <button class="top-icon" id="btnToc" aria-label="Contents" title="Contents" style="display:none">☰</button>
       <button class="top-icon" id="btnPage" aria-label="Page view" title="Page view" style="display:none">📖</button>
       <button class="top-icon" id="btnTranslate" aria-label="Translate" title="Translate" style="display:none">🌐</button>
@@ -3662,6 +3663,33 @@ async function fetchFeedConditional(url,meta){
   }
   return{status:"error"};
 }
+/* ───── Share-by-URL ─────
+   Sharing is just the raw source link — the podcast/blog/book you were reading,
+   not a special link. A friend with the Primer pastes it (or opens it as a
+   ?url= deep link) and loadUrl() pulls it into their library. */
+async function getCurrentSourceUrl(){
+  if(!currentBookId)return null;
+  try{const b=await dbGetBook(currentBookId);return (b&&b.source&&b.source.url)||null;}catch{return null;}
+}
+async function shareCurrentSource(){
+  const url=await getCurrentSourceUrl();
+  if(!url){showToast("No link to share — this one came from a file.");return null;}
+  const title=(bookTitle&&bookTitle.textContent)||"Reading on the OpenHearth Primer";
+  try{
+    if(navigator.share)await navigator.share({title,url});
+    else if(navigator.clipboard){await navigator.clipboard.writeText(url);showToast("Link copied — send it to a friend");}
+    else showToast(url);
+  }catch(ex){/* user dismissed the share sheet — nothing to do */}
+  return url;
+}
+// The url to auto-load when the Primer is opened as a shared link.
+function deepLinkUrl(){
+  try{
+    const p=new URLSearchParams(location.search);
+    const u=p.get("url")||p.get("add");
+    return u?u.trim():null;
+  }catch{return null;}
+}
 async function loadUrl(url){
   const clean=url.trim();
   if(!clean)return;
@@ -5091,6 +5119,7 @@ $("ctxToggle").addEventListener("change",e=>{
 });
 
 btnToc.addEventListener("click",()=>{tocDrawer.classList.contains("open")?closeToc():openToc();});
+$("btnShare").addEventListener("click",shareCurrentSource);
 btnPage.addEventListener("click",()=>{pagePanel.classList.contains("open")?closePagePanel():openPagePanel();});
 $("btnTranslate").addEventListener("click",()=>{
   _transActive=!_transActive;
@@ -7999,6 +8028,14 @@ $("btnDashboard").addEventListener("click",openParentDashboard);
 applyTheme();
 renderProfiles();
 migrateProfilePids().catch(ex=>console.warn("PID migration",ex));
+// Shared-link landing: a friend opened the Primer with ?url=<the source>. Drop
+// into the reader and pull it in — loadUrl() persists it to their library.
+(function(){
+  const dl=deepLinkUrl();
+  if(!dl)return;
+  enterReader();
+  loadUrl(dl);
+})();
 // Run eviction policy once on boot. Deferred so it doesn't block the first paint.
 setTimeout(()=>{runEviction().catch(ex=>console.warn("[eviction]",ex));},3000);
 

@@ -291,3 +291,43 @@ test('dragging across tokens saves a multi-word focus span', async () => {
     await page.close();
   }
 });
+
+// ───────── Share-by-URL ─────────
+test('a doc loaded from a URL exposes its source link to share', async () => {
+  const page = await freshPage();
+  try {
+    await page.evaluate(async () => {
+      const parsed = window.parseTextFile('Some article text to read here at length.', 'An Article');
+      window.loadDocument(parsed);
+      await window.persistNewBook({ name: 'url-x.txt', size: 40 }, parsed, {
+        kind: 'url', url: 'https://example.com/post', label: 'An Article',
+      });
+    });
+    const url = await page.evaluate(async () => window.getCurrentSourceUrl());
+    assert.equal(url, 'https://example.com/post', 'the loaded article shares its raw source link');
+  } finally {
+    await page.close();
+  }
+});
+
+test('a pasted/file doc has no shareable link', async () => {
+  const page = await freshPage(FOCUS_DOC, 'Focus Doc'); // loadDocument without persistNewBook
+  try {
+    const url = await page.evaluate(async () => window.getCurrentSourceUrl());
+    assert.equal(url, null, 'nothing to share for a doc with no source URL');
+  } finally {
+    await page.close();
+  }
+});
+
+test('opening ohPrimer with ?url= is read as a shared link to auto-load', async () => {
+  const page = await browser.newPage();
+  try {
+    const src = 'https://example.com/feed/post-1';
+    await page.goto(server.base + '/index.html?url=' + encodeURIComponent(src), { waitUntil: 'load' });
+    await page.waitForFunction(() => typeof window.deepLinkUrl === 'function');
+    assert.equal(await page.evaluate(() => window.deepLinkUrl()), src, 'the ?url= param is parsed for a friend opening a shared link');
+  } finally {
+    await page.close();
+  }
+});
