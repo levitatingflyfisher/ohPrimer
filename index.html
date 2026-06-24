@@ -2364,6 +2364,9 @@ function loadScript(src){
 /* ───── Reader state ───── */
 let doc=null;             // tokenizer output: {words,originals,pacing,segments,chapters,skipped}
 let idx=0,playing=false;
+// Set when openToc() pauses an in-progress read, so closeToc() can resume it
+// (peek-the-contents-then-keep-reading). Cleared by any explicit stop().
+let tocResumeAfter=false;
 let wpm=300,mode="classic",fSize=44,sigma=2.0,winSize=5;
 let timer=null,sessionStart=null,sessionWordsStart=0;
 
@@ -2423,6 +2426,12 @@ function openToc(){
   tocDrawer.classList.add("open");
   drawerBackdrop.classList.add("open");
   btnToc.classList.add("on");
+  // Pause the read while the contents are open — words shouldn't keep flying
+  // by behind the drawer while you're deciding where to jump. Remember that we
+  // were playing so closeToc() can resume (a quick peek, not "I'm done"). Use a
+  // lightweight pause, not stop(): we don't want to end/record the session or
+  // pop the end-of-session comprehension banner just for opening the contents.
+  if(playing){tocResumeAfter=true;pausePlayback();}else{tocResumeAfter=false;}
   // Apply the current-chapter highlight now that the drawer is open (the
   // per-word updateTocCurrent() early-returns while closed — TOC sweep).
   updateTocCurrent();
@@ -2433,6 +2442,10 @@ function closeToc(){
   tocDrawer.classList.remove("open");
   drawerBackdrop.classList.remove("open");
   btnToc.classList.remove("on");
+  // Resume the read we paused on open — unless the reader started playing again
+  // by hand (tPlay) while the drawer was open, in which case it's already going.
+  if(tocResumeAfter&&!playing)play();
+  tocResumeAfter=false;
 }
 
 /* ───── Page strip ───── */
@@ -2838,6 +2851,7 @@ function play(){
 }
 function stop(){
   playing=false;
+  tocResumeAfter=false;  // an explicit stop cancels any pending TOC-resume
   clearTimeout(timer);
   tPlay.textContent="▶";
   tPlay.classList.remove("on");
@@ -2847,6 +2861,19 @@ function stop(){
   clearPositionSave();
   saveCurrentPosition();
   offerComprehensionCheck();
+}
+// Lightweight pause for transient interruptions (opening the contents drawer):
+// halts the RSVP/TTS loop and flips the button, but does NOT end or record the
+// session, save position, or offer a comprehension check the way stop() does —
+// so a quick peek doesn't look like "finished reading". Idempotent.
+function pausePlayback(){
+  if(!playing)return;
+  playing=false;
+  clearTimeout(timer);
+  tPlay.textContent="▶";
+  tPlay.classList.remove("on");
+  releaseWakeLock();
+  ttsStop();
 }
 function toggle(){
   if(!doc)return;
