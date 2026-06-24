@@ -2412,7 +2412,8 @@ const tickOpts=$("tickOpts"),rStatus=$("rStatus"),displayInner=$("displayInner")
 const sentinelBanner=$("sentinelBanner"),sentinelMsg=$("sentinelMsg");
 const modalBackdrop=$("modalBackdrop"),modalTitle=$("modalTitle"),modalBody=$("modalBody");
 const tocDrawer=$("tocDrawer"),tocList=$("tocList"),drawerBackdrop=$("drawerBackdrop");
-const btnToc=$("btnToc"),btnPage=$("btnPage");
+const btnToc=$("btnToc"),btnPage=$("btnPage"),btnShare=$("btnShare");
+const extractPreview=$("extractPreview");
 const pagePanel=$("pagePanel"),pageBody=$("pageBody"),pageTitle=$("pageTitle");
 const pageMap=$("pageMap"),pageMapCanvas=$("pageMapCanvas"),pageMapCaret=$("pageMapCaret");
 let pageRange=null;  // {start,end,title} — current rendered range
@@ -3187,22 +3188,18 @@ async function importOhcourse(text){
     parsed,{kind:"ohcourse",label:title});
   const bookId=currentBookId;
   // 2) One two-sided card per retrieval item, linked to the book.
-  const pi=activeProfile().pid;
   let cards=0;
   for(const node of course.nodes){
     const items=Array.isArray(node.items)?node.items:[];
     for(const item of items){
       const card=_ohcourseItemToCard(item);
       if(!card||!card.prompt)continue;
-      const rec={
-        id:"ext::"+pi+"::"+Date.now()+"::"+Math.random().toString(36).slice(2,7),
-        profileIdx:pi,kind:"cloze",srcType:item.type,
-        bookId,bookTitle:title,chapterTitle:node.title||"",
+      const rec=newSrsCard({
+        kind:"cloze",srcType:item.type,bookId,
+        bookTitle:title,chapterTitle:node.title||"",
         context:card.prompt,clozePrompt:card.prompt,clozeAnswer:card.answer||"?",
         focusWord:"",focusIdx:0,wordIdx:0,
-        createdAt:Date.now(),
-        EF:2.5,reps:0,interval:0,nextReview:Date.now(),history:[],
-      };
+      });
       try{await dbSaveExtract(rec);cards++;}catch(ex){console.warn("ohcourse card save",ex);}
     }
   }
@@ -3763,19 +3760,30 @@ function scoreNode(el){
   return score;
 }
 /* ───── Extracts & SM-2 review ───── */
+// The spaced-repetition envelope every card carries — fresh id, current book,
+// due now, SM-2 defaults. The card's content fields are merged in by the caller.
+// All three creation paths (reader extracts, .ohcourse imports, AI-made cloze)
+// go through here so the envelope can't drift between them.
+function newSrsCard(fields){
+  const pi=activeProfile().pid;
+  return Object.assign({
+    id:"ext::"+pi+"::"+Date.now()+"::"+Math.random().toString(36).slice(2,7),
+    profileIdx:pi,
+    bookId:currentBookId||null,
+    createdAt:Date.now(),
+    EF:2.5,reps:0,interval:0,nextReview:Date.now(),
+    history:[],
+  },fields);
+}
 // Build an extract record from a fixed context (a window of words) and a focus
 // span given as RELATIVE indices into that context. Shared by the instant path
 // (vocab flag, imports) and the adjustable extract preview, so every card has the
 // same shape — including focusEndIdx, which the two-sided review reader reads.
 function makeExtractRec(kind,parts,focusStart,focusEnd,wordIdx){
-  const pi=activeProfile().pid;
   const fs=Math.max(0,Math.min(focusStart,focusEnd));
   const fe=Math.min(parts.length-1,Math.max(focusStart,focusEnd));
-  return {
-    id:"ext::"+pi+"::"+Date.now()+"::"+Math.random().toString(36).slice(2,7),
-    profileIdx:pi,
+  return newSrsCard({
     kind:kind||"passage",
-    bookId:currentBookId||null,
     bookTitle:bookTitle.textContent||"Untitled",
     wordIdx,
     focusIdx:fs,
@@ -3783,10 +3791,7 @@ function makeExtractRec(kind,parts,focusStart,focusEnd,wordIdx){
     focusWord:parts.slice(fs,fe+1).join(" "),
     context:parts.join(" "),
     chapterTitle:currentChapterTitle()||"",
-    createdAt:Date.now(),
-    EF:2.5,reps:0,interval:0,nextReview:Date.now(),
-    history:[],
-  };
+  });
 }
 // The context window around the reading point, plus the default focus (the
 // single word being read) as relative indices. Segment words (figures/code/etc.)
@@ -3832,10 +3837,10 @@ function openExtractPreview(){
   if(!d){showToast("Nothing to extract here");return;}
   _extractDraft=d;
   renderExtractPreview();
-  $("extractPreview").classList.add("open");
+  extractPreview.classList.add("open");
 }
 function closeExtractPreview(){
-  $("extractPreview").classList.remove("open");
+  extractPreview.classList.remove("open");
   _extractDraft=null;
 }
 async function confirmExtractPreview(){
@@ -3854,7 +3859,7 @@ function extractCurrent(){ openExtractPreview(); }
 (function(){
   let dragging=false,anchor=-1;
   const tokIdx=e=>{const t=e.target&&e.target.closest&&e.target.closest(".ep-token");return t?+t.dataset.i:-1;};
-  const isOpen=()=>$("extractPreview").classList.contains("open");
+  const isOpen=()=>extractPreview.classList.contains("open");
   document.addEventListener("pointerdown",e=>{
     if(!isOpen()||!_extractDraft)return;
     const i=tokIdx(e);if(i<0)return;
@@ -3865,7 +3870,9 @@ function extractCurrent(){ openExtractPreview(); }
   document.addEventListener("pointermove",e=>{
     if(!dragging||!_extractDraft)return;
     const i=tokIdx(e);if(i<0)return;
-    _extractDraft.focusStart=Math.min(anchor,i);_extractDraft.focusEnd=Math.max(anchor,i);
+    const ns=Math.min(anchor,i),ne=Math.max(anchor,i);
+    if(ns===_extractDraft.focusStart&&ne===_extractDraft.focusEnd)return; // span unchanged — skip the repaint
+    _extractDraft.focusStart=ns;_extractDraft.focusEnd=ne;
     paintExtractSelection();
   });
   document.addEventListener("pointerup",()=>{dragging=false;});
@@ -3920,7 +3927,7 @@ $("tFlagWord").addEventListener("click",flagWord);
 $("epConfirm").addEventListener("click",confirmExtractPreview);
 $("epCancel").addEventListener("click",closeExtractPreview);
 $("epClose").addEventListener("click",closeExtractPreview);
-$("extractPreview").addEventListener("click",e=>{if(e.target===$("extractPreview"))closeExtractPreview();});
+extractPreview.addEventListener("click",e=>{if(e.target===extractPreview)closeExtractPreview();});
 
 /* ───── Review screen ───── */
 let reviewQueue=[],reviewPos=0,reviewTotal=0;
@@ -4014,21 +4021,27 @@ function renderReview(){
   const r=reviewQueue[reviewPos];
   const isWord=r.kind==="word";
   const isCloze=r.kind==="cloze";
-  const parts=(r.context||"").split(/\s+/);
   // Two-sided rendering for passage & vocab cards: the focus span is blanked on
   // the front and revealed on tap. focusEndIdx defaults to focusIdx (a single
   // word); Bug 2's adjustable highlight sets a wider range. The answer is NOT
-  // placed in the DOM until reveal — textContent would otherwise leak it.
-  const fStart=Math.max(0,r.focusIdx||0);
-  const fEnd=Math.min(parts.length-1,r.focusEndIdx!=null?r.focusEndIdx:fStart);
-  const frontParts=[];
-  for(let i=0;i<parts.length;i++){
-    if(i===fStart)frontParts.push(`<span class="focus-blank">____</span>`);
-    else if(i>fStart&&i<=fEnd)continue; // the whole span collapses into one blank
-    else frontParts.push(esc(parts[i]));
+  // placed in the DOM until reveal — textContent would otherwise leak it. Cloze
+  // cards render from clozePrompt/clozeAnswer instead, so skip this for them.
+  let revealedHtml="";
+  let focusCardBody="";
+  if(!isCloze){
+    const parts=(r.context||"").split(/\s+/);
+    const fStart=Math.max(0,r.focusIdx||0);
+    const fEnd=Math.min(parts.length-1,r.focusEndIdx!=null?r.focusEndIdx:fStart);
+    const frontParts=[];
+    for(let i=0;i<parts.length;i++){
+      if(i===fStart)frontParts.push(`<span class="focus-blank">____</span>`);
+      else if(i>fStart&&i<=fEnd)continue; // the whole span collapses into one blank
+      else frontParts.push(esc(parts[i]));
+    }
+    revealedHtml=parts.map((w,i)=>(i>=fStart&&i<=fEnd)?`<span class="focus-word">${esc(w)}</span>`:esc(w)).join(" ");
+    const tag=isWord?`<div class="review-kind-tag">Vocab</div>`:"";
+    focusCardBody=`${tag}<div class="review-context" id="focusFront" data-reveal>${frontParts.join(" ")}</div>`;
   }
-  const blankedHtml=frontParts.join(" ");
-  const revealedHtml=parts.map((w,i)=>(i>=fStart&&i<=fEnd)?`<span class="focus-word">${esc(w)}</span>`:esc(w)).join(" ");
   const previews={again:sm2(r,1),hard:sm2(r,3),good:sm2(r,4),easy:sm2(r,5)};
   const sourceLine=`<div class="review-source">${esc(r.bookTitle||"—")}${r.chapterTitle?" · "+esc(r.chapterTitle):""}</div>`;
   let cardBody;
@@ -4040,11 +4053,8 @@ function renderReview(){
     cardBody=`<div class="review-kind-tag">${tag}</div>
        <div class="review-context cloze-prompt">${esc(r.clozePrompt||"")}</div>
        <div class="cloze-answer" id="clozeReveal" data-reveal title="Tap to reveal">${esc(r.clozeAnswer||"?")}</div>${sourceLine}`;
-  }else if(isWord){
-    cardBody=`<div class="review-kind-tag">Vocab</div>
-       <div class="review-context" id="focusFront" data-reveal>${blankedHtml}</div>${sourceLine}`;
   }else{
-    cardBody=`<div class="review-context" id="focusFront" data-reveal>${blankedHtml}</div>${sourceLine}`;
+    cardBody=`${focusCardBody}${sourceLine}`;
   }
   body.innerHTML=`
     <div class="review-progress">Review · ${reviewPos+1} of ${reviewTotal}</div>
@@ -4091,9 +4101,7 @@ function renderReview(){
         const resp=await callLLM({system:sys,user:r.context||"",maxTokens:200});
         const lines=resp.split("\n").map(l=>l.trim()).filter(Boolean);
         if(lines.length<2){showToast("AI returned unexpected format");clozeBtn.disabled=false;clozeBtn.textContent="Make cloze ✨";return;}
-        const clozeRec={
-          id:"ext::"+activeProfile().pid+"::"+Date.now()+"::"+Math.random().toString(36).slice(2,7),
-          profileIdx:activeProfile().pid,
+        const clozeRec=newSrsCard({
           kind:"cloze",
           bookId:r.bookId||null,
           bookTitle:r.bookTitle||"",
@@ -4104,10 +4112,7 @@ function renderReview(){
           focusWord:r.focusWord||"",
           focusIdx:r.focusIdx||0,
           wordIdx:r.wordIdx||0,
-          createdAt:Date.now(),
-          EF:2.5,reps:0,interval:0,nextReview:Date.now(),
-          history:[],
-        };
+        });
         await dbSaveExtract(clozeRec);
         showToast("Cloze card created");
         clozeBtn.textContent="Done ✓";
@@ -5119,7 +5124,7 @@ $("ctxToggle").addEventListener("change",e=>{
 });
 
 btnToc.addEventListener("click",()=>{tocDrawer.classList.contains("open")?closeToc():openToc();});
-$("btnShare").addEventListener("click",shareCurrentSource);
+btnShare.addEventListener("click",shareCurrentSource);
 btnPage.addEventListener("click",()=>{pagePanel.classList.contains("open")?closePagePanel():openPagePanel();});
 $("btnTranslate").addEventListener("click",()=>{
   _transActive=!_transActive;
@@ -5178,7 +5183,7 @@ document.addEventListener("keydown",e=>{
   if(e.target.tagName==="TEXTAREA"||e.target.tagName==="INPUT")return;
   // The extract preview owns the keyboard while open: Esc cancels, Enter saves,
   // and reader shortcuts (e/v/space/arrows) must not fire behind it.
-  if($("extractPreview").classList.contains("open")){
+  if(extractPreview.classList.contains("open")){
     if(e.key==="Escape"){e.preventDefault();closeExtractPreview();}
     else if(e.key==="Enter"){e.preventDefault();confirmExtractPreview();}
     return;
