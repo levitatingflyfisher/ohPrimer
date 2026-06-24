@@ -1,0 +1,34 @@
+{
+  "//": "Ordered assembly manifest for the modular rebuild. build.mjs concatenates",
+  "//2": "these fragments into a single dist/index.html, preserving the project's",
+  "//3": "single-file deliverable. Port one module at a time from ../index.html into",
+  "//4": "src/, append it here, and diff behavior against SPEC.md / regress vs ISSUES.md.",
+  "title": "The OpenHearth Primer",
+  "lang": "en",
+  "styles": [
+    "src/styles/00-tokens.css"
+  ],
+  "stylesTodo": [
+    "src/styles/10-base.css", "src/styles/20-home.css", "src/styles/30-reader.css",
+    "src/styles/40-modals.css", "src/styles/50-library.css", "src/styles/60-responsive.css",
+    "src/styles/70-a11y.css   (NEW: prefers-reduced-motion, focus rings, contrast)"
+  ],
+  "scripts": [
+    "src/scripts/00-utils.js",
+    "src/scripts/05-state.js",
+    "src/scripts/06-privacy.js",
+    "src/scripts/15-tokenizer.js",
+    "src/scripts/20-parsers.js",
+    "src/scripts/40-comms.js",
+    "src/scripts/50-learning.js"
+  ],
+  "scriptsTodo": [
+    "src/scripts/20-parsers.js      (PARTIAL: parseTextFile ported; EPUB+PDF still TODO, deferred H1/H8)",
+    "src/scripts/50-learning.js     (PARTIAL: sm2 + computeReviewStats ported; review UI still TODO)",
+    "src/scripts/30-reader.js       (state, render modes, playback, seekTo)",
+    "src/scripts/35-ui.js           (screens, modals w/ focus trap; provides confirmAction/showToast)",
+    "src/scripts/45-content.js      (sources, feeds UI on top of comms)",
+    "src/scripts/60-ai.js           (providers + on-device ML)",
+    "src/scripts/90-init.js         (wiring, SW registration)"
+  ]
+}

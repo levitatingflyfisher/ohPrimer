@@ -1,0 +1,55 @@
+/* ─── ohStyle design tokens ───
+   First ported slice (extracted verbatim from index.html so behavior is identical).
+   Primitive palette + spacing/radii/type, then the light/dark semantic layers. */
+:root{
+  --oh-hearth-50:#FDF5F3;--oh-hearth-100:#F8E8E3;--oh-hearth-200:#EDCDC5;
+  --oh-hearth-300:#D9A99E;--oh-hearth-400:#C47B6A;--oh-hearth-500:#A85040;
+  --oh-hearth-600:#8B3E2F;--oh-hearth-700:#6E2F22;
+  --oh-linen-50:#FBF8F4;--oh-linen-100:#F5EFE6;--oh-linen-200:#EAE1D4;
+  --oh-linen-300:#D4C5B0;--oh-linen-400:#B3A08A;--oh-linen-500:#8C7B65;
+  --oh-linen-600:#6E5F4C;--oh-linen-700:#4D3E2E;--oh-linen-800:#35281C;--oh-linen-900:#2C1810;
+  --oh-sage-500:#5E9478;--oh-red-500:#B0382A;
+  --oh-dark-bg:#1C1007;--oh-dark-card:#2A1A0D;--oh-dark-elev:#3A2215;
+  --oh-dark-border-s:#5A3A28;--oh-dark-border:#6B4A34;
+
+  --oh-space-xs:4px;--oh-space-sm:8px;--oh-space-md:16px;--oh-space-lg:24px;--oh-space-xl:40px;
+  --oh-radius-sm:4px;--oh-radius-md:8px;--oh-radius-lg:12px;--oh-radius-full:9999px;
+
+  --oh-font-heading:'Lora',Georgia,serif;
+  --oh-font-reading:'Lora',Georgia,serif;
+  --oh-font-ui:'Nunito',system-ui,sans-serif;
+  --oh-font-mono:'JetBrains Mono','Consolas',monospace;
+}
+
+/* Light theme (default) */
+:root,
+[data-theme="light"]{
+  --oh-bg:var(--oh-linen-50);
+  --oh-surface:var(--oh-linen-100);
+  --oh-surface-sunken:#F0E8DA;
+  --oh-text-primary:var(--oh-linen-900);
+  --oh-text-secondary:var(--oh-linen-700);
+  --oh-text-tertiary:var(--oh-linen-500);
+  --oh-interactive:var(--oh-hearth-500);
+  --oh-interactive-hover:var(--oh-hearth-600);
+  --oh-border:var(--oh-linen-300);
+  --oh-border-subtle:var(--oh-linen-200);
+  --oh-shadow-sm:0 1px 4px rgba(44,24,16,0.09);
+  --oh-shadow-md:0 4px 12px rgba(44,24,16,0.10);
+}
+
+/* Dark theme — explicit override */
+[data-theme="dark"]{
+  --oh-bg:var(--oh-dark-bg);
+  --oh-surface:var(--oh-dark-card);
+  --oh-surface-sunken:#15090B;
+  --oh-text-primary:var(--oh-linen-100);
+  --oh-text-secondary:var(--oh-linen-300);
+  --oh-text-tertiary:var(--oh-linen-500);
+  --oh-interactive:var(--oh-hearth-400);
+  --oh-interactive-hover:var(--oh-hearth-300);
+  --oh-border:var(--oh-dark-border);
+  --oh-border-subtle:var(--oh-dark-border-s);
+  --oh-shadow-sm:inset 0 1px 0 rgba(255,255,255,0.05);
+  --oh-shadow-md:inset 0 1px 0 rgba(255,255,255,0.07);
+}

@@ -1,0 +1,33 @@
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+
+# Brainstorm session artifacts
+.superpowers/
+.claude/
+
+# Local working artifacts — never shipped (org convention)
+docs/superpowers/
+CLAUDE.md
+
+# Legacy prototypes (superseded by index.html, kept local for reference)
+legacy/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Rebuild build output (generated from rebuild/src by rebuild/build.mjs)
+rebuild/dist/
+node_modules/

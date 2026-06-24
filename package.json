@@ -1,0 +1,12 @@
+{
+  "name": "openhearth-primer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A reading engine for the whole family — single-file PWA.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build:rebuild": "node rebuild/build.mjs",
+    "test": "node rebuild/test/logic.test.mjs && node rebuild/test/state.test.mjs && node rebuild/test/privacy.test.mjs && node rebuild/test/tokenizer.test.mjs && node rebuild/test/parsers.test.mjs && node rebuild/test/learning.test.mjs && node rebuild/test/comms.test.mjs"
+  }
+}
