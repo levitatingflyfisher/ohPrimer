@@ -164,3 +164,69 @@ test('a vocab card hides the flagged word until revealed', async () => {
     await page.close();
   }
 });
+
+// ───────── Bug 2: adjust the highlight before creating the card ─────────
+const savedFocusWords = (page) =>
+  page.evaluate(async () =>
+    (await window.dbListExtracts(window.activeProfile().pid)).map((e) => e.focusWord));
+
+test('extracting opens a preview (no auto-save) defaulting to the reading word', async () => {
+  const page = await freshPage(FOCUS_DOC, 'Focus Doc');
+  try {
+    await page.evaluate(() => window.seekTo(4)); // reading word = "zonktastic"
+    await page.evaluate(() => window.extractCurrent());
+    assert.ok(
+      await page.evaluate(() => document.getElementById('extractPreview').classList.contains('open')),
+      'pressing extract must open a preview rather than saving immediately',
+    );
+    const defSel = await page.evaluate(() =>
+      [...document.querySelectorAll('#epTokens .ep-token.sel')].map((t) => t.textContent.trim()));
+    assert.deepEqual(defSel, ['zonktastic'], 'preview defaults the focus to the reading word');
+  } finally {
+    await page.close();
+  }
+});
+
+test('adjusting the focus to a different word saves that word', async () => {
+  const page = await freshPage(FOCUS_DOC, 'Focus Doc');
+  try {
+    await page.evaluate(() => window.seekTo(4));
+    await page.evaluate(() => window.extractCurrent());
+    const gamma = await page.evaluateHandle(() =>
+      [...document.querySelectorAll('#epTokens .ep-token')].find((t) => t.textContent.trim() === 'gamma'));
+    await gamma.asElement().click();
+    await page.click('#epConfirm');
+    const words = await savedFocusWords(page);
+    assert.ok(words.includes('gamma'), `saved card should focus "gamma"; got ${JSON.stringify(words)}`);
+  } finally {
+    await page.close();
+  }
+});
+
+test('dragging across tokens saves a multi-word focus span', async () => {
+  const page = await freshPage(FOCUS_DOC, 'Focus Doc');
+  try {
+    await page.evaluate(() => window.seekTo(4));
+    await page.evaluate(() => window.extractCurrent());
+    const center = (word) =>
+      page.evaluate((w) => {
+        const t = [...document.querySelectorAll('#epTokens .ep-token')].find((e) => e.textContent.trim() === w);
+        const r = t.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      }, word);
+    const a = await center('epsilon');
+    const b = await center('zeta');
+    await page.mouse.move(a.x, a.y);
+    await page.mouse.down();
+    await page.mouse.move(b.x, b.y, { steps: 6 });
+    await page.mouse.up();
+    await page.click('#epConfirm');
+    const words = await savedFocusWords(page);
+    assert.ok(
+      words.includes('epsilon zeta'),
+      `expected a multi-word focus "epsilon zeta"; got ${JSON.stringify(words)}`,
+    );
+  } finally {
+    await page.close();
+  }
+});

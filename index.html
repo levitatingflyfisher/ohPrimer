@@ -433,6 +433,12 @@ input[type=range]{width:100%;accent-color:var(--oh-interactive);height:24px}
 .review-context[data-reveal]{cursor:pointer}
 .review-context .focus-blank{display:inline-block;min-width:3em;border-bottom:2px solid var(--oh-interactive);color:transparent;font-weight:600;border-radius:2px;vertical-align:baseline}
 .review-context[data-reveal]::after{content:"Tap to reveal";display:block;margin-top:var(--oh-space-sm);font-family:var(--oh-font-ui);font-size:11px;color:var(--oh-text-tertiary);letter-spacing:0.04em}
+/* Extract preview — choose the focus span before creating a card. */
+.ep-hint{font-family:var(--oh-font-ui);font-size:13px;color:var(--oh-text-tertiary);margin-bottom:var(--oh-space-md)}
+.ep-tokens{font-family:var(--oh-font-reading,Lora,Georgia,serif);font-size:19px;line-height:1.9;color:var(--oh-text-primary);user-select:none;-webkit-user-select:none;cursor:pointer}
+.ep-tokens .ep-token{padding:1px 2px;border-radius:3px;border-bottom:2px solid transparent}
+.ep-tokens .ep-token.sel{background:var(--oh-hearth-100);color:var(--oh-interactive);font-weight:600;border-bottom-color:var(--oh-interactive)}
+[data-theme="dark"] .ep-tokens .ep-token.sel{background:rgba(255,170,100,0.18)}
 .review-source{margin-top:var(--oh-space-md);font-family:var(--oh-font-ui);font-size:12px;color:var(--oh-text-tertiary)}
 .review-actions{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--oh-space-sm);width:100%;margin-top:var(--oh-space-xs)}
 .review-btn{padding:12px 8px;border:1px solid var(--oh-border);background:var(--oh-surface);color:var(--oh-text-primary);font-family:var(--oh-font-ui);font-weight:600;font-size:13px;border-radius:var(--oh-radius-md);cursor:pointer;transition:background 180ms ease,border-color 180ms ease}
@@ -952,6 +958,22 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,.profile-card:fo
     <div class="modal-foot">
       <button class="settings-test" id="generateCancel">Cancel</button>
       <button id="generateGo" style="background:var(--oh-interactive);color:#FFF;border:1px solid var(--oh-interactive);padding:8px 20px;border-radius:var(--oh-radius-md);font-family:var(--oh-font-ui);font-weight:600;font-size:14px">Generate</button>
+    </div>
+  </div>
+</div>
+<div class="modal-backdrop" id="extractPreview">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-head">
+      <h3>Make a card</h3>
+      <button class="modal-close" id="epClose" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="ep-hint">Tap a word — or drag across several — to choose what gets blanked out on the card.</div>
+      <div class="ep-tokens" id="epTokens"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="settings-test" id="epCancel">Cancel</button>
+      <button id="epConfirm" style="background:var(--oh-interactive);color:#FFF;border:1px solid var(--oh-interactive);padding:8px 20px;border-radius:var(--oh-radius-md);font-family:var(--oh-font-ui);font-weight:600;font-size:14px">Save card</button>
     </div>
   </div>
 </div>
@@ -3624,45 +3646,113 @@ function scoreNode(el){
   return score;
 }
 /* ───── Extracts & SM-2 review ───── */
-async function saveExtractRecord(kind){
-  if(!doc||!doc.words.length)return null;
+// Build an extract record from a fixed context (a window of words) and a focus
+// span given as RELATIVE indices into that context. Shared by the instant path
+// (vocab flag, imports) and the adjustable extract preview, so every card has the
+// same shape — including focusEndIdx, which the two-sided review reader reads.
+function makeExtractRec(kind,parts,focusStart,focusEnd,wordIdx){
   const pi=activeProfile().pid;
-  const win=kind==="word"?6:15;
-  const start=Math.max(0,idx-win),end=Math.min(doc.words.length,idx+win+1);
-  const parts=[];
-  let focusRelIdx=0;
-  for(let i=start;i<end;i++){
-    const w=doc.words[i];
-    if(!w||doc.segments.has(i))continue;
-    if(i===idx)focusRelIdx=parts.length;
-    parts.push(w);
-  }
-  const context=parts.join(" ");
-  const focusWord=doc.words[idx]||"";
-  const rec={
+  const fs=Math.max(0,Math.min(focusStart,focusEnd));
+  const fe=Math.min(parts.length-1,Math.max(focusStart,focusEnd));
+  return {
     id:"ext::"+pi+"::"+Date.now()+"::"+Math.random().toString(36).slice(2,7),
     profileIdx:pi,
     kind:kind||"passage",
     bookId:currentBookId||null,
     bookTitle:bookTitle.textContent||"Untitled",
-    wordIdx:idx,
-    focusIdx:focusRelIdx,
-    focusWord,
-    context,
+    wordIdx,
+    focusIdx:fs,
+    focusEndIdx:fe,
+    focusWord:parts.slice(fs,fe+1).join(" "),
+    context:parts.join(" "),
     chapterTitle:currentChapterTitle()||"",
     createdAt:Date.now(),
     EF:2.5,reps:0,interval:0,nextReview:Date.now(),
     history:[],
   };
+}
+// The context window around the reading point, plus the default focus (the
+// single word being read) as relative indices. Segment words (figures/code/etc.)
+// are skipped so the context stays plain prose. null ⇒ nothing to extract.
+function buildExtractDraft(kind){
+  if(!doc||!doc.words.length)return null;
+  const win=kind==="word"?6:15;
+  const start=Math.max(0,idx-win),end=Math.min(doc.words.length,idx+win+1);
+  const parts=[];let focusRel=0;
+  for(let i=start;i<end;i++){
+    const w=doc.words[i];
+    if(!w||doc.segments.has(i))continue;
+    if(i===idx)focusRel=parts.length;
+    parts.push(w);
+  }
+  if(!parts.length)return null;
+  return {kind:kind||"passage",parts,focusStart:focusRel,focusEnd:focusRel,wordIdx:idx};
+}
+async function saveExtractRecord(kind){
+  const d=buildExtractDraft(kind);
+  if(!d)return null;
+  const rec=makeExtractRec(d.kind,d.parts,d.focusStart,d.focusEnd,d.wordIdx);
   try{await dbSaveExtract(rec);}catch(ex){console.warn("Extract save failed",ex);return null;}
   return rec;
 }
-async function extractCurrent(){
-  const rec=await saveExtractRecord("passage");
-  if(!rec)return;
-  showToast(`Extract saved · ${rec.focusWord}`);
-  flashButton("tExtract");
+
+/* ───── Extract preview: adjust the highlight before creating the card ───── */
+let _extractDraft=null;
+function renderExtractPreview(){
+  const d=_extractDraft;if(!d)return;
+  $("epTokens").innerHTML=d.parts.map((w,i)=>
+    `<span class="ep-token${i>=d.focusStart&&i<=d.focusEnd?" sel":""}" data-i="${i}">${esc(w)}</span>`).join(" ");
 }
+// Update only the highlight classes during a drag — rebuilding innerHTML mid-drag
+// would drop the elements the pointer is tracking.
+function paintExtractSelection(){
+  const d=_extractDraft;if(!d)return;
+  $("epTokens").querySelectorAll(".ep-token").forEach((t,i)=>
+    t.classList.toggle("sel",i>=d.focusStart&&i<=d.focusEnd));
+}
+function openExtractPreview(){
+  const d=buildExtractDraft("passage");
+  if(!d){showToast("Nothing to extract here");return;}
+  _extractDraft=d;
+  renderExtractPreview();
+  $("extractPreview").classList.add("open");
+}
+function closeExtractPreview(){
+  $("extractPreview").classList.remove("open");
+  _extractDraft=null;
+}
+async function confirmExtractPreview(){
+  const d=_extractDraft;
+  if(!d){closeExtractPreview();return;}
+  const rec=makeExtractRec("passage",d.parts,d.focusStart,d.focusEnd,d.wordIdx);
+  try{await dbSaveExtract(rec);}catch(ex){console.warn("Extract save failed",ex);showToast("Save failed");return;}
+  closeExtractPreview();
+  showToast(`Card saved · ${rec.focusWord}`);
+  flashButton("tExtract");
+  if(typeof updateReviewBadge==="function")updateReviewBadge();
+}
+function extractCurrent(){ openExtractPreview(); }
+// Drag (or tap) across the preview tokens to choose the focus span. Pointer
+// events cover mouse + touch; a plain tap is a zero-length drag (single word).
+(function(){
+  let dragging=false,anchor=-1;
+  const tokIdx=e=>{const t=e.target&&e.target.closest&&e.target.closest(".ep-token");return t?+t.dataset.i:-1;};
+  const isOpen=()=>$("extractPreview").classList.contains("open");
+  document.addEventListener("pointerdown",e=>{
+    if(!isOpen()||!_extractDraft)return;
+    const i=tokIdx(e);if(i<0)return;
+    dragging=true;anchor=i;
+    _extractDraft.focusStart=i;_extractDraft.focusEnd=i;paintExtractSelection();
+    e.preventDefault();
+  });
+  document.addEventListener("pointermove",e=>{
+    if(!dragging||!_extractDraft)return;
+    const i=tokIdx(e);if(i<0)return;
+    _extractDraft.focusStart=Math.min(anchor,i);_extractDraft.focusEnd=Math.max(anchor,i);
+    paintExtractSelection();
+  });
+  document.addEventListener("pointerup",()=>{dragging=false;});
+})();
 async function flagWord(){
   const rec=await saveExtractRecord("word");
   if(!rec)return;
@@ -3710,6 +3800,10 @@ function clearStatus(){
 })();
 $("tExtract").addEventListener("click",extractCurrent);
 $("tFlagWord").addEventListener("click",flagWord);
+$("epConfirm").addEventListener("click",confirmExtractPreview);
+$("epCancel").addEventListener("click",closeExtractPreview);
+$("epClose").addEventListener("click",closeExtractPreview);
+$("extractPreview").addEventListener("click",e=>{if(e.target===$("extractPreview"))closeExtractPreview();});
 
 /* ───── Review screen ───── */
 let reviewQueue=[],reviewPos=0,reviewTotal=0;
@@ -4960,6 +5054,13 @@ tocList.addEventListener("click",e=>{
 
 document.addEventListener("keydown",e=>{
   if(e.target.tagName==="TEXTAREA"||e.target.tagName==="INPUT")return;
+  // The extract preview owns the keyboard while open: Esc cancels, Enter saves,
+  // and reader shortcuts (e/v/space/arrows) must not fire behind it.
+  if($("extractPreview").classList.contains("open")){
+    if(e.key==="Escape"){e.preventDefault();closeExtractPreview();}
+    else if(e.key==="Enter"){e.preventDefault();confirmExtractPreview();}
+    return;
+  }
   if(e.key==="Escape"&&generateBackdrop.classList.contains("open")){closeGenerate();return;}
   if(e.key==="Escape"&&tocDrawer.classList.contains("open")){closeToc();return;}
   if(e.key==="Escape"&&pagePanel.classList.contains("open")){closePagePanel();return;}
