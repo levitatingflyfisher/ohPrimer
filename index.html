@@ -8049,6 +8049,14 @@ if("serviceWorker"in navigator){
   navigator.serviceWorker.register("sw.js").catch(()=>{});
 }
 
+/* ───── Persistent storage ─────
+   Ask the browser to keep our localStorage + IndexedDB across sessions, so an
+   installed-to-home-screen PWA isn't evicted by the browser under storage
+   pressure. (Distinct from runEviction(), which is our own in-quota tidying.) */
+if(navigator.storage&&navigator.storage.persist){
+  navigator.storage.persisted().then(p=>{if(!p)navigator.storage.persist();}).catch(()=>{});
+}
+
 /* ───── Offline awareness ───── */
 window.addEventListener("online",()=>showToast("Back online"));
 window.addEventListener("offline",()=>showToast("Offline — reading and review still work"));
